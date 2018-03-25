@@ -11,11 +11,11 @@ artifactsTemplatesFolder="artifact-templates"
 : ${GENERATED_ARTIFACTS_FOLDER:=./artifacts}
 : ${GENERATED_DOCKER_COMPOSE_FOLDER:=./dockercompose}
 
-: ${DOMAIN:="example.com"}
+: ${DOMAIN:="fabrictax.ch"}
 : ${IP_ORDERER:="54.234.201.67"}
-: ${ORG1:="a"}
-: ${ORG2:="b"}
-: ${ORG3:="c"}
+: ${ORG1:="zurich"}
+: ${ORG2:="zug"}
+: ${ORG3:="tax"}
 : ${IP1:="54.86.191.160"}
 : ${IP2:="54.243.0.168"}
 : ${IP3:="54.211.142.174"}
@@ -35,11 +35,6 @@ WGET_OPTS="--verbose -N"
 CLI_TIMEOUT=10000
 COMPOSE_TEMPLATE=$TEMPLATES_DOCKER_COMPOSE_FOLDER/docker-composetemplate.yaml
 COMPOSE_FILE_DEV=$TEMPLATES_DOCKER_COMPOSE_FOLDER/docker-composedev.yaml
-
-CHAINCODE_COMMON_NAME=reference
-CHAINCODE_BILATERAL_NAME=relationship
-CHAINCODE_COMMON_INIT='{"Args":["init","a","100","b","100"]}'
-CHAINCODE_BILATERAL_INIT='{"Args":["init","a","100","b","100"]}'
 
 DEFAULT_ORDERER_PORT=7050
 DEFAULT_WWW_PORT=8080
@@ -420,11 +415,13 @@ function instantiateChaincode () {
     channel_name=$2
     n=$3
     i=$4
+    policy=$5
+    v="1.0"
     f="$GENERATED_DOCKER_COMPOSE_FOLDER/docker-compose-${org}.yaml"
 
     info "instantiating chaincode $n on $channel_name by $org using $f with $i"
 
-    c="CORE_PEER_ADDRESS=peer0.$org.$DOMAIN:7051 peer chaincode instantiate -n $n -v 1.0 -c '$i' -o orderer.$DOMAIN:7050 -C $channel_name --tls --cafile /etc/hyperledger/crypto/orderer/tls/ca.crt"
+    c="CORE_PEER_ADDRESS=peer0.$org.$DOMAIN:7051 peer chaincode instantiate -n $n -v $v -P \"$policy\" -c '$i' -o orderer.$DOMAIN:7050 -C $channel_name --tls --cafile /etc/hyperledger/crypto/orderer/tls/ca.crt"
     d="cli.$org.$DOMAIN"
 
     echo "instantiating with $d by $c"
@@ -460,7 +457,7 @@ function installChaincode() {
     f="$GENERATED_DOCKER_COMPOSE_FOLDER/docker-compose-${org}.yaml"
     # chaincode path is the same as chaincode name by convention: code of chaincode instruction lives in ./chaincode/go/instruction mapped to docker path /opt/gopath/src/instruction
     p=${n}
-    #p=/opt/chaincode/node
+    #p="/opt/chaincode/node/${n}"
     l=golang
     #l=node
 
@@ -524,7 +521,7 @@ function installAll() {
 
   sleep 2
 
-  for chaincode_name in ${CHAINCODE_COMMON_NAME} ${CHAINCODE_BILATERAL_NAME}
+  for chaincode_name in transfer governance
   do
     installChaincode ${org} ${chaincode_name} "1.0"
   done
@@ -545,10 +542,11 @@ function createJoinInstantiateWarmUp() {
   channel_name=${2}
   chaincode_name=${3}
   chaincode_init=${4}
+  policy=${5}
 
   createChannel ${org} ${channel_name}
   joinChannel ${org} ${channel_name}
-  instantiateChaincode ${org} ${channel_name} ${chaincode_name} ${chaincode_init}
+  instantiateChaincode ${org} ${channel_name} ${chaincode_name} ${chaincode_init} ${policy}
 #  sleep 2
 #  warmUpChaincode ${org} ${channel_name} ${chaincode_name}
 }
@@ -1151,17 +1149,13 @@ if [ "${MODE}" == "up" -a "${ORG}" == "" ]; then
     installAll ${org}
   done
 
-  createJoinInstantiateWarmUp ${ORG1} common ${CHAINCODE_COMMON_NAME} ${CHAINCODE_COMMON_INIT}
-  createJoinInstantiateWarmUp ${ORG1} "${ORG1}-${ORG2}" ${CHAINCODE_BILATERAL_NAME} ${CHAINCODE_BILATERAL_INIT}
-  createJoinInstantiateWarmUp ${ORG1} "${ORG1}-${ORG3}" ${CHAINCODE_BILATERAL_NAME} ${CHAINCODE_BILATERAL_INIT}
+  createJoinInstantiateWarmUp ${ORG3} common transfer '{"Args":[]}' "AND('zurichMSP.member','zugMSP.member')"
 
-  joinWarmUp ${ORG2} common ${CHAINCODE_COMMON_NAME}
-  joinWarmUp ${ORG2} "${ORG1}-${ORG2}" ${CHAINCODE_BILATERAL_NAME}
-  createJoinInstantiateWarmUp ${ORG2} "${ORG2}-${ORG3}" ${CHAINCODE_BILATERAL_NAME} ${CHAINCODE_BILATERAL_INIT}
+  instantiateChaincode ${ORG3} common governance '{"Args":[]}' "OR('taxMSP.member')"
 
-  joinWarmUp ${ORG3} common ${CHAINCODE_COMMON_NAME}
-  joinWarmUp ${ORG3} "${ORG1}-${ORG3}" ${CHAINCODE_BILATERAL_NAME}
-  joinWarmUp ${ORG3} "${ORG2}-${ORG3}" ${CHAINCODE_BILATERAL_NAME}
+  joinChannel ${ORG1} common
+
+  joinChannel ${ORG2} common
 
 elif [ "${MODE}" == "down" ]; then
   for org in ${DOMAIN} ${ORG1} ${ORG2} ${ORG3}
